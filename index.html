@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dino Game</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #f7f7f7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Courier New', monospace;
+      user-select: none;
+    }
+
+    #score-board {
+      width: 600px;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #535353;
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+
+    #game-container {
+      position: relative;
+      width: 600px;
+      height: 200px;
+      overflow: hidden;
+      border-bottom: 2px solid #535353;
+    }
+
+    canvas {
+      display: block;
+      background: #f7f7f7;
+    }
+
+    #message {
+      width: 600px;
+      text-align: center;
+      margin-top: 16px;
+      font-size: 13px;
+      color: #535353;
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div id="score-board">
+    <span>HI <span id="hi-score">00000</span></span>
+    <span id="score">00000</span>
+  </div>
+  <div id="game-container">
+    <canvas id="canvas" width="600" height="200"></canvas>
+  </div>
+  <div id="message">PRESS SPACE / TAP TO START</div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const hiScoreEl = document.getElementById('hi-score');
+    const messageEl = document.getElementById('message');
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const GROUND = H - 30;
+
+    // ── Colors ──────────────────────────────────────────────────────────────
+    const COLOR = {
+      body:   '#535353',
+      light:  '#f7f7f7',
+      dark:   '#404040',
+    };
+
+    // ── State ────────────────────────────────────────────────────────────────
+    let state = 'idle'; // idle | running | dead
+    let score = 0;
+    let hiScore = 0;
+    let speed = 5;
+    let frameCount = 0;
+    let animFrame;
+
+    // ── Ground ───────────────────────────────────────────────────────────────
+    const ground = { x: 0 };
+
+    function drawGround() {
+      ctx.fillStyle = COLOR.body;
+      // main line
+      ctx.fillRect(0, GROUND, W, 2);
+      // pebbles
+      ctx.fillStyle = '#bbb';
+      for (let i = 0; i < 20; i++) {
+        const px = ((ground.x * 0.5 + i * 31) % (W + 10)) - 5;
+        ctx.fillRect(px, GROUND + 5, 3, 1);
+        const px2 = ((ground.x * 0.5 + i * 31 + 15) % (W + 10)) - 5;
+        ctx.fillRect(px2, GROUND + 10, 2, 1);
+      }
+    }
+
+    // ── Dino ─────────────────────────────────────────────────────────────────
+    const dino = {
+      x: 70, y: GROUND,
+      vy: 0,
+      jumping: false,
+      ducking: false,
+      dead: false,
+      legPhase: 0,
+
+      width()  { return this.ducking ? 36 : 22; },
+      height() { return this.ducking ? 18 : 36; },
+      top()    { return this.y - this.height(); },
+
+      jump() {
+        if (!this.jumping && !this.ducking) {
+          this.vy = -14;
+          this.jumping = true;
+        }
+      },
+
+      duck(on) {
+        if (!this.jumping) this.ducking = on;
+      },
+
+      update() {
+        if (this.jumping) {
+          this.vy += 0.7;
+          this.y += this.vy;
+          if (this.y >= GROUND) {
+            this.y = GROUND;
+            this.vy = 0;
+            this.jumping = false;
+          }
+        }
+        if (!this.jumping) this.legPhase += 0.25;
+      },
+
+      draw() {
+        ctx.fillStyle = this.dead ? '#888' : COLOR.body;
+        const x = this.x;
+        const top = this.top();
+        const w = this.width();
+        const h = this.height();
+
+        if (this.ducking) {
+          // ducking body
+          ctx.fillRect(x, top, w, h);
+          // head bump
+          ctx.fillRect(x + w - 10, top - 8, 14, 10);
+          // eye
+          ctx.fillStyle = COLOR.light;
+          ctx.fillRect(x + w, top - 5, 4, 4);
+          ctx.fillStyle = '#333';
+          ctx.fillRect(x + w + 1, top - 4, 2, 2);
+          ctx.fillStyle = this.dead ? '#888' : COLOR.body;
+          // legs
+          const lp = Math.floor(this.legPhase) % 2;
+          ctx.fillRect(x + 4,  this.y - (lp === 0 ? 12 : 6), 6, lp === 0 ? 12 : 6);
+          ctx.fillRect(x + 16, this.y - (lp === 1 ? 12 : 6), 6, lp === 1 ? 12 : 6);
+        } else {
+          // body
+          ctx.fillRect(x, top + 12, w, h - 12);
+          // neck + head
+          ctx.fillRect(x + 8, top, 18, 20);
+          // snout
+          ctx.fillRect(x + 18, top + 6, 8, 8);
+          // nostril
+          ctx.fillStyle = COLOR.light;
+          ctx.fillRect(x + 23, top + 7, 2, 2);
+          // eye
+          ctx.fillStyle = COLOR.light;
+          ctx.fillRect(x + 14, top + 3, 6, 6);
+          if (this.dead) {
+            // X eye
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(x + 14, top + 3, 6, 6);
+            ctx.fillStyle = '#333';
+            ctx.fillRect(x + 14, top + 3, 2, 2);
+            ctx.fillRect(x + 18, top + 3, 2, 2);
+            ctx.fillRect(x + 16, top + 5, 2, 2);
+            ctx.fillRect(x + 14, top + 7, 2, 2);
+            ctx.fillRect(x + 18, top + 7, 2, 2);
+          } else {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(x + 16, top + 5, 2, 2);
+          }
+          ctx.fillStyle = this.dead ? '#888' : COLOR.body;
+          // arm
+          ctx.fillRect(x + 4, top + 18, 8, 4);
+          // legs
+          if (!this.dead) {
+            const lp = Math.floor(this.legPhase) % 2;
+            ctx.fillRect(x + 4,  this.y - (lp === 0 ? 16 : 8), 6, lp === 0 ? 16 : 8);
+            ctx.fillRect(x + 14, this.y - (lp === 1 ? 16 : 8), 6, lp === 1 ? 16 : 8);
+          } else {
+            ctx.fillRect(x + 4,  this.y - 10, 6, 10);
+            ctx.fillRect(x + 14, this.y - 10, 6, 10);
+          }
+        }
+      },
+
+      hitbox() {
+        return { x: this.x + 4, y: this.top() + (this.ducking ? 0 : 12), w: this.width() - 8, h: this.height() - (this.ducking ? 4 : 12) };
+      }
+    };
+
+    // ── Obstacles ─────────────────────────────────────────────────────────────
+    class Cactus {
+      constructor(x) {
+        this.x = x;
+        this.type = Math.random() < 0.5 ? 'small' : 'tall';
+        this.count = Math.floor(Math.random() * 3) + 1; // 1-3 cacti
+      }
+
+      get w() { return this.type === 'tall' ? 14 : 10; }
+      get h() { return this.type === 'tall' ? 50 : 32; }
+
+      draw() {
+        ctx.fillStyle = COLOR.body;
+        const spacing = this.w + 4;
+        for (let i = 0; i < this.count; i++) {
+          const cx = this.x + i * spacing;
+          const top = GROUND - this.h;
+          // stem
+          ctx.fillRect(cx + this.w / 2 - 3, top, 6, this.h);
+          // top cap
+          ctx.fillRect(cx + this.w / 2 - 5, top, 10, 6);
+          // left arm
+          const armY = top + (this.type === 'tall' ? 16 : 10);
+          ctx.fillRect(cx, armY, this.w / 2 - 2, 6);
+          ctx.fillRect(cx, armY - 8, 6, 8);
+          // right arm
+          ctx.fillRect(cx + this.w / 2 + 2, armY, this.w / 2 - 2, 6);
+          ctx.fillRect(cx + this.w - 6, armY - 8, 6, 8);
+        }
+      }
+
+      hitbox() {
+        const totalW = this.count * (this.w + 4) - 4;
+        return { x: this.x + 2, y: GROUND - this.h + 4, w: totalW - 4, h: this.h - 4 };
+      }
+
+      get right() { return this.x + this.count * (this.w + 4); }
+    }
+
+    class Bird {
+      constructor(x) {
+        this.x = x;
+        this.y = GROUND - [20, 45, 75][Math.floor(Math.random() * 3)];
+        this.wingPhase = 0;
+      }
+
+      draw() {
+        ctx.fillStyle = COLOR.body;
+        this.wingPhase += 0.18;
+        const wUp = Math.sin(this.wingPhase) > 0;
+        const bx = this.x;
+        const by = this.y;
+        // body
+        ctx.fillRect(bx + 4, by + 4, 20, 10);
+        // beak
+        ctx.fillRect(bx + 24, by + 6, 8, 4);
+        // eye
+        ctx.fillStyle = COLOR.light;
+        ctx.fillRect(bx + 18, by + 5, 4, 4);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(bx + 19, by + 6, 2, 2);
+        ctx.fillStyle = COLOR.body;
+        // wings
+        if (wUp) {
+          ctx.fillRect(bx + 6, by - 6, 12, 8);
+        } else {
+          ctx.fillRect(bx + 6, by + 10, 12, 8);
+        }
+        // tail
+        ctx.fillRect(bx, by + 6, 6, 4);
+      }
+
+      hitbox() { return { x: this.x + 4, y: this.y + 2, w: 24, h: 14 }; }
+      get right() { return this.x + 32; }
+    }
+
+    let obstacles = [];
+    let nextObstacleDist = 80;
+
+    function spawnObstacle() {
+      const cls = score > 300 && Math.random() < 0.3 ? Bird : Cactus;
+      obstacles.push(new cls(W + 20));
+    }
+
+    // ── Clouds ────────────────────────────────────────────────────────────────
+    const clouds = [];
+    for (let i = 0; i < 4; i++) {
+      clouds.push({ x: 80 + i * 160, y: 20 + Math.random() * 40 });
+    }
+
+    function drawCloud(x, y) {
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(x,      y + 6,  30, 12);
+      ctx.fillRect(x + 6,  y,      18, 8);
+      ctx.fillRect(x + 10, y - 4,  10, 6);
+    }
+
+    // ── Collision ─────────────────────────────────────────────────────────────
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x &&
+             a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    // ── Flash effect ──────────────────────────────────────────────────────────
+    let flashTimer = 0;
+
+    // ── Main loop ─────────────────────────────────────────────────────────────
+    function reset() {
+      dino.y = GROUND;
+      dino.vy = 0;
+      dino.jumping = false;
+      dino.ducking = false;
+      dino.dead = false;
+      dino.legPhase = 0;
+      obstacles.length = 0;
+      score = 0;
+      speed = 5;
+      frameCount = 0;
+      nextObstacleDist = 80;
+      ground.x = 0;
+      state = 'running';
+      messageEl.textContent = '';
+    }
+
+    function gameOver() {
+      state = 'dead';
+      dino.dead = true;
+      flashTimer = 6;
+      if (score > hiScore) hiScore = score;
+      hiScoreEl.textContent = String(hiScore).padStart(5, '0');
+      messageEl.textContent = 'GAME OVER — PRESS SPACE / TAP TO RESTART';
+    }
+
+    function loop() {
+      animFrame = requestAnimationFrame(loop);
+      ctx.clearRect(0, 0, W, H);
+
+      // flash on death
+      if (flashTimer > 0) {
+        ctx.fillStyle = flashTimer % 2 === 0 ? '#fff' : '#f7f7f7';
+        ctx.fillRect(0, 0, W, H);
+        flashTimer--;
+      }
+
+      // clouds
+      clouds.forEach(c => {
+        if (state === 'running') c.x -= speed * 0.2;
+        if (c.x < -50) c.x = W + 50;
+        drawCloud(c.x, c.y);
+      });
+
+      // ground
+      if (state === 'running') ground.x = (ground.x + speed) % W;
+      drawGround();
+
+      if (state === 'running') {
+        frameCount++;
+        score = Math.floor(frameCount / 6);
+        scoreEl.textContent = String(score).padStart(5, '0');
+
+        // increase speed
+        speed = 5 + Math.floor(score / 100) * 0.5;
+
+        // obstacles
+        nextObstacleDist -= speed;
+        if (nextObstacleDist <= 0) {
+          spawnObstacle();
+          nextObstacleDist = 220 + Math.random() * 300 - Math.min(score / 5, 100);
+        }
+        obstacles = obstacles.filter(o => o.right > -10);
+        obstacles.forEach(o => { o.x -= speed; o.draw(); });
+
+        // dino
+        dino.update();
+
+        // collision
+        const dHit = dino.hitbox();
+        for (const o of obstacles) {
+          if (rectsOverlap(dHit, o.hitbox())) { gameOver(); break; }
+        }
+
+        // milestone flash
+        if (score > 0 && score % 100 === 0 && frameCount % 6 === 0) {
+          flashTimer = 6;
+        }
+      } else {
+        obstacles.forEach(o => o.draw());
+      }
+
+      dino.draw();
+
+      // debug hitboxes (uncomment to visualize)
+      // ctx.strokeStyle='red'; const h=dino.hitbox(); ctx.strokeRect(h.x,h.y,h.w,h.h);
+    }
+
+    // ── Input ─────────────────────────────────────────────────────────────────
+    function onAction(duck = false) {
+      if (state === 'idle' || state === 'dead') { reset(); return; }
+      if (duck) dino.duck(true);
+      else dino.jump();
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); onAction(false); }
+      if (e.code === 'ArrowDown') { e.preventDefault(); onAction(true); }
+    });
+    document.addEventListener('keyup', e => {
+      if (e.code === 'ArrowDown') dino.duck(false);
+    });
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); onAction(false); }, { passive: false });
+    canvas.addEventListener('click', () => onAction(false));
+
+    // ── Start ─────────────────────────────────────────────────────────────────
+    loop();
+  </script>
+</body>
+</html>
